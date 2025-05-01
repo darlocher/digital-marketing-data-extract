@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""
+SVG Graph Data Extractor
+
+This script extracts data points from an SVG graph (like those from Facebook unfollow data)
+and converts them to a CSV table with properly mapped dates and values.
+
+Usage:
+    1. Get the SVG code from a graph (using browser Inspect Element)
+    2. Paste it into the svg_string variable
+    3. Configure the date range and axis values
+    4. Run the script to generate a CSV file
+"""
+
+import re
+import csv
+import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta
+
+def extract_points_from_path(d_attribute):
+    """Extracts (x, y) coordinate pairs from an SVG path 'd' attribute."""
+    Args:      d_attribute: The 'd' attribute value from an SVG path element
+    Returns:   list of (x, y) coordinate tuples
+    """
+    points = re.findall(r"([ML])\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)", d_attribute)
+    return [(float(x), float(y)) for cmd, x, y in points]
+
+def extract_svg_data_from_string(svg_content):
+    """Parses an SVG string and extracts graph data points from <path> elements.
+    Args:      svg_content: The SVG content as a string
+    Returns:   list of (x, y) coordinate tuples extracted from all paths
+    """
+    try:
+        root = ET.fromstring(svg_content)  # Parse the SVG string
+    except ET.ParseError as e:
+        print(f"Error parsing SVG: {e}")
+        return []
+
+    namespace = {'svg': 'http://www.w3.org/2000/svg'}  # Handle namespace if necessary
+    
+    # Find all paths, both with and without namespace
+    paths = root.findall('.//{http://www.w3.org/2000/svg}path') or root.findall('.//path')
+
+    if not paths:
+        print("No path elements found in the SVG string.")
+        return []
+
+    data_points = []
+    for path in paths:
+        d_attribute = path.get('d')
+        if d_attribute:
+            data_points.extend(extract_points_from_path(d_attribute))
+    
+    return sorted(data_points, key=lambda point: point[0])  # Sort by x-coordinate
+
+def map_x_to_dates(x_values, x_min, x_max, start_date, end_date) -> List[datetime]:
+    """Maps the x values to corresponding dates.
+        Args:
+        x_values: List of x-coordinates from the SVG
+        x_min: Minimum x-coordinate value in the graph
+        x_max: Maximum x-coordinate value in the graph
+        start_date: Date corresponding to the minimum x-coordinate
+        end_date: Date corresponding to the maximum x-coordinate
+    Returns:
+        list of mapped datetime objects
+    """
+    date_range = (end_date - start_date).days
+    return [start_date + timedelta(days=(x - x_min) / (x_max - x_min) * date_range) for x in x_values]
+
+def map_y_to_values(y_values, y_min, y_max, target_min, target_max):
+    """Maps the y values to the target value range.
+    Args:
+        y_values: List of y-coordinates from the SVG
+        y_min: Minimum y-coordinate value in the graph
+        y_max: Maximum y-coordinate value in the graph
+        target_min: Minimum value in the target range
+        target_max: Maximum value in the target range
+        
+    Returns:
+        list of mapped values in the target range
+    """
+    if y_max == y_min:  # Prevent division by zero
+        return [target_min] * len(y_values)
+        
+    return [target_min + (y - y_min) / (y_max - y_min) * (target_max - target_min) for y in y_values]
+
+def save_to_csv(data, output_file):
+    """Saves extracted graph data points to a CSV file.
+    Args:
+        data: List of (date, value) tuples
+        output_file: Path to the output CSV file
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    if not data:
+        print("No data to save to CSV.")
+        return False
+
+    try:
+        with open(output_file, 'w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(["Date", "Value"])
+            
+            # Format the dates and round the values for better readability
+            formatted_data = [(date.strftime('%Y-%m-%d'), round(value, 2)) for date, value in data]
+            writer.writerows(formatted_data)
+            
+            print(f"Data extracted and saved to {output_file}")
+            return True
+    except Exception as e:
+        print(f"Error saving to CSV: {e}")
+        return False
+
+
+def main():
+    """Main function to extract SVG data and save to CSV."""
+    
+    # svg_string = '''
+    [paste your SVG str here]
+    '''
+    
+    # Define the known date range and axis values
+    x_min, x_max = 81.0, 607.75  # Replace with the actual x-axis min/max values from the graph
+    y_min, y_max = 14, 215.95  # Replace with the actual y-axis min/max values from the graph
+
+    # Set the date range that corresponds to the x-axis
+    start_date = datetime(2025, 1, 1)  # Replace with the actual date that the graph starts with
+    end_date = datetime(2025, 3, 24)  # Replace with the actual date that the graph ends on
+
+     # Define the target value range for the y-axis
+    target_min = 0      # Replace with the actual minimum value in the graph
+    target_max = 1000   # Replace with the actual maximum value in the graph
+    
+    # Extract points from SVG string
+    csv_filename = "fb_unfollow_export.csv"
+    data_points = extract_svg_data_from_string(svg_string)
+    
+    if data_points:
+        # Separate x and y values
+        x_values, y_values = zip(*data_points)
+    
+        # Map x values to dates and y values to their target range
+        mapped_dates = map_x_to_dates(x_values, x_min, x_max, start_date, end_date)
+        mapped_values = map_y_to_values(y_values, y_min, y_max, target_min, target_max)
+    
+        # Combine mapped dates and values into a final dataset
+        final_data = list(zip(mapped_dates, mapped_values))
+    
+        # Save to CSV
+        save_to_csv(final_data, csv_filename)
+    else:
+        print("No data was extracted from the SVG string.")
+
+      
+if __name__ == "__main__":
+    main()
